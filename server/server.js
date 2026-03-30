@@ -6,6 +6,7 @@ const cors = require('cors');
 const authRoutes = require('./routes/auth');
 const billRoutes = require('./routes/bills');
 const analyticsRoutes = require('./routes/analytics');
+const uploadBillRoute = require('./routes/upload-bill'); // NEW
 
 const app = express();
 
@@ -13,10 +14,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Routes
+// Routes (existing — unchanged)
 app.use('/api/auth', authRoutes);
 app.use('/api/bills', billRoutes);
 app.use('/api/analytics', analyticsRoutes);
+
+// NEW: ML-powered upload route
+app.use('/api/bills/upload-bill', uploadBillRoute);
 
 // Health check
 app.get('/', (_req, res) => res.json({ status: 'ok' }));

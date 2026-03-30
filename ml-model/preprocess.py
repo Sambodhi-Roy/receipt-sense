@@ -1,82 +1,60 @@
 """
-preprocess.py
--------------
-Validates and prepares a receipt image for the Donut model.
-
-Input  : path to a local image file  (str | Path)
-Output : a PIL.Image ready to be passed to the Donut processor
+preprocess.py — Receipt image preprocessing
+Prepares a PIL image for Donut inference.
 """
 
-from pathlib import Path
 from PIL import Image, ImageOps, ImageFilter
-import logging
-
-logger = logging.getLogger(__name__)
-
-# Donut was trained on 960×1280 (H×W); keep within reason
-MAX_SIDE = 1920
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff", ".tif"}
 
 
-def load_and_preprocess(image_path: str | Path) -> Image.Image:
+# Donut CORD-v2 was trained on ~1280×960 images
+TARGET_WIDTH = 1280
+TARGET_HEIGHT = 960
+
+
+def preprocess_image(image: Image.Image) -> Image.Image:
     """
-    Load an image from disk and apply lightweight pre-processing
-    to improve OCR accuracy from the Donut model.
-
-    Steps
-    -----
-    1. Validate the file exists and is a supported format.
-    2. Convert to RGB (drop alpha, handle palette modes).
-    3. Auto-orient according to EXIF data (fix phone photos).
-    4. Downscale very large images while keeping aspect ratio.
-    5. Lightly sharpen to help with blurry receipt photos.
-
-    Parameters
-    ----------
-    image_path : str | Path
-        Absolute or relative path to the receipt image.
-
-    Returns
-    -------
-    PIL.Image.Image
-        RGB image ready for the Donut feature extractor.
-
-    Raises
-    ------
-    FileNotFoundError  : image_path does not exist.
-    ValueError         : unsupported file format.
+    Normalise a receipt image before passing to Donut.
+    Steps:
+      1. Convert to RGB (drop alpha channels, handle grayscale)
+      2. Auto-rotate using EXIF orientation
+      3. Deskew / straighten via modest sharpening
+      4. Resize to the model's expected resolution (pad, do not crop)
+    Returns a PIL.Image ready for the processor.
     """
-    image_path = Path(image_path)
+    # 1. Ensure RGB
+    image = image.convert("RGB")
 
-    if not image_path.exists():
-        raise FileNotFoundError(f"Image not found: {image_path}")
+    # 2. Respect EXIF orientation (phone photos are often rotated)
+    try:
+        image = ImageOps.exif_transpose(image)
+    except Exception:
+        pass  # Non-critical — continue without rotation
 
-    if image_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-        raise ValueError(
-            f"Unsupported format '{image_path.suffix}'. "
-            f"Supported: {', '.join(SUPPORTED_EXTENSIONS)}"
-        )
+    # 3. Light sharpening helps OCR on blurry receipts
+    image = image.filter(ImageFilter.SHARPEN)
 
-    logger.info("Loading image: %s", image_path)
-    img = Image.open(image_path)
+    # 4. Resize with letterboxing to preserve aspect ratio
+    image = _resize_with_padding(image, TARGET_WIDTH, TARGET_HEIGHT)
 
-    # 1. Auto-orient from EXIF (handles portrait phone shots)
-    img = ImageOps.exif_transpose(img)
+    return image
 
-    # 2. Ensure RGB (handles RGBA, palette, greyscale, etc.)
-    if img.mode != "RGB":
-        img = img.convert("RGB")
 
-    # 3. Downscale if either dimension exceeds MAX_SIDE
-    w, h = img.size
-    if max(w, h) > MAX_SIDE:
-        scale = MAX_SIDE / max(w, h)
-        new_size = (int(w * scale), int(h * scale))
-        img = img.resize(new_size, Image.LANCZOS)
-        logger.info("Resized from %s to %s", (w, h), new_size)
+def _resize_with_padding(
+    image: Image.Image,
+    target_w: int,
+    target_h: int,
+    fill_color: tuple = (255, 255, 255),
+) -> Image.Image:
+    """Resize image to fit within target dims; pad remaining space with white."""
+    original_w, original_h = image.size
+    scale = min(target_w / original_w, target_h / original_h)
 
-    # 4. Light sharpening – helps with slightly out-of-focus receipts
-    img = img.filter(ImageFilter.SHARPEN)
+    new_w = int(original_w * scale)
+    new_h = int(original_h * scale)
+    resized = image.resize((new_w, new_h), Image.LANCZOS)
 
-    logger.info("Preprocessing complete. Final size: %s", img.size)
-    return img
+    padded = Image.new("RGB", (target_w, target_h), fill_color)
+    offset_x = (target_w - new_w) // 2
+    offset_y = (target_h - new_h) // 2
+    padded.paste(resized, (offset_x, offset_y))
+    return padded
