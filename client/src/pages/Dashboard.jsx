@@ -5,24 +5,28 @@ import UploadModal from '../components/UploadModal';
 import CategoryPieChart from '../components/CategoryPieChart';
 import MonthlyTrendChart from '../components/MonthlyTrendChart';
 import InsightsSection from '../components/InsightsSection';
+import BudgetAlert from '../components/BudgetAlert';
 
 export default function Dashboard() {
     const [analytics, setAnalytics] = useState({ weeklyTotal: 0, monthlyTotal: 0 });
     const [extended, setExtended] = useState(null);
+    const [budgetAlerts, setBudgetAlerts] = useState([]);
     const [bills, setBills] = useState([]);
     const [showUpload, setShowUpload] = useState(false);
     const [loading, setLoading] = useState(true);
 
     const fetchData = async () => {
         try {
-            const [analyticsRes, billsRes, extRes] = await Promise.all([
+            const [analyticsRes, billsRes, extRes, budgetRes] = await Promise.all([
                 api.get('/analytics'),
                 api.get('/bills'),
                 api.get('/analytics/extended').catch(() => ({ data: null })),
+                api.get('/budget/status').catch(() => ({ data: { alerts: [] } })),
             ]);
             setAnalytics(analyticsRes.data);
             setBills(billsRes.data);
             setExtended(extRes.data);
+            setBudgetAlerts(budgetRes.data?.alerts || []);
         } catch (err) {
             console.error(err);
         } finally {
@@ -34,10 +38,10 @@ export default function Dashboard() {
 
     const handleUploaded = (newBill) => {
         setBills((prev) => [newBill, ...prev]);
-        // Refresh both analytics endpoints
         Promise.all([
             api.get('/analytics').then((res) => setAnalytics(res.data)),
             api.get('/analytics/extended').then((res) => setExtended(res.data)).catch(() => {}),
+            api.get('/budget/status').then((res) => setBudgetAlerts(res.data?.alerts || [])).catch(() => {}),
         ]).catch(console.error);
     };
 
@@ -56,6 +60,9 @@ export default function Dashboard() {
             <Navbar />
 
             <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+                {/* ── Budget alerts ── */}
+                <BudgetAlert alerts={budgetAlerts} />
 
                 {/* ── Stats row ── */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -113,7 +120,7 @@ export default function Dashboard() {
                     Upload Bill
                 </button>
 
-                {/* ── Charts row (only if extended data exists) ── */}
+                {/* ── Charts row ── */}
                 {extended && (extended.categorySpending.length > 0 || extended.monthlySpending.length > 0) && (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {extended.categorySpending.length > 0 && (
@@ -122,7 +129,6 @@ export default function Dashboard() {
                                 <CategoryPieChart data={extended.categorySpending} />
                             </div>
                         )}
-
                         {extended.monthlySpending.length > 0 && (
                             <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
                                 <h2 className="text-base font-semibold text-gray-800 mb-4">Monthly Trend</h2>
@@ -187,4 +193,3 @@ export default function Dashboard() {
         </div>
     );
 }
-

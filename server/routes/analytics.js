@@ -163,4 +163,118 @@ function generateInsights({ categorySpending, monthlySpending, avgBillValue }) {
     return insights.length > 0 ? insights : ['Keep uploading receipts for spending insights!'];
 }
 
+
+// ─── NEW: Spending Forecast ───────────────────────────────────────────────────
+
+/**
+ * GET /api/analytics/forecast
+ * Uses simple linear regression on the last 6 months of spending to predict
+ * the next month's total. Also returns confidence level and category forecasts.
+ */
+router.get('/forecast', auth, async (req, res) => {
+    try {
+        const bills = await Bill.find({ userId: req.user.id }).lean();
+
+        if (bills.length === 0) {
+            return res.json({ hasData: false, message: 'Upload more bills to see your spending forecast.' });
+        }
+
+        // ── Build monthly totals ─────────────────────────────────────────────
+        const monthlyMap = {};
+        const categoryMonthlyMap = {}; // { category: { "YYYY-MM": amount } }
+
+        for (const bill of bills) {
+            const d = new Date(bill.date);
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            monthlyMap[key] = (monthlyMap[key] || 0) + bill.total;
+
+            for (const item of bill.items || []) {
+                const cat = item.category || 'others';
+                if (!categoryMonthlyMap[cat]) categoryMonthlyMap[cat] = {};
+                categoryMonthlyMap[cat][key] = (categoryMonthlyMap[cat][key] || 0)
+                    + item.price * (item.quantity || 1);
+            }
+        }
+
+        const sortedMonths = Object.keys(monthlyMap).sort();
+        const recent = sortedMonths.slice(-6); // up to last 6 months
+
+        if (recent.length < 2) {
+            return res.json({
+                hasData: false,
+                message: 'Need at least 2 months of data for a forecast. Keep uploading!',
+            });
+        }
+
+        // ── Linear regression helper ─────────────────────────────────────────
+        function linearForecast(values) {
+            const n = values.length;
+            const xs = values.map((_, i) => i);
+            const ys = values;
+            const xMean = xs.reduce((a, b) => a + b, 0) / n;
+            const yMean = ys.reduce((a, b) => a + b, 0) / n;
+            const num   = xs.reduce((s, x, i) => s + (x - xMean) * (ys[i] - yMean), 0);
+            const den   = xs.reduce((s, x) => s + (x - xMean) ** 2, 0);
+            const slope = den === 0 ? 0 : num / den;
+            const intercept = yMean - slope * xMean;
+            const nextX = n;
+            const predicted = intercept + slope * nextX;
+
+            // R² for confidence
+            const ssTot = ys.reduce((s, y) => s + (y - yMean) ** 2, 0);
+            const ssRes = ys.reduce((s, y, i) => s + (y - (intercept + slope * i)) ** 2, 0);
+            const r2 = ssTot === 0 ? 1 : Math.max(0, 1 - ssRes / ssTot);
+
+            return { predicted: Math.max(0, predicted), slope, r2 };
+        }
+
+        // ── Overall forecast ─────────────────────────────────────────────────
+        const overallValues = recent.map((m) => monthlyMap[m]);
+        const overall = linearForecast(overallValues);
+
+        // Next month label
+        const lastMonth = recent[recent.length - 1];
+        const [ly, lm] = lastMonth.split('-').map(Number);
+        const nextDate  = new Date(ly, lm, 1);
+        const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+
+        // ── Category forecasts ───────────────────────────────────────────────
+        const categoryForecasts = [];
+        for (const [cat, monthMap] of Object.entries(categoryMonthlyMap)) {
+            const catValues = recent.map((m) => monthMap[m] || 0);
+            if (catValues.filter(Boolean).length < 2) continue;
+            const { predicted, slope } = linearForecast(catValues);
+            categoryForecasts.push({
+                category: cat,
+                predicted: parseFloat(predicted.toFixed(2)),
+                trend: slope > 0.5 ? 'up' : slope < -0.5 ? 'down' : 'stable',
+            });
+        }
+        categoryForecasts.sort((a, b) => b.predicted - a.predicted);
+
+        // ── Confidence label ─────────────────────────────────────────────────
+        const confidence = overall.r2 > 0.8 ? 'high' : overall.r2 > 0.5 ? 'medium' : 'low';
+
+        // ── Historical series for chart ──────────────────────────────────────
+        const historical = recent.map((m) => ({
+            month: m,
+            amount: parseFloat(monthlyMap[m].toFixed(2)),
+        }));
+
+        res.json({
+            hasData: true,
+            nextMonth,
+            predicted: parseFloat(overall.predicted.toFixed(2)),
+            confidence,
+            r2: parseFloat(overall.r2.toFixed(3)),
+            trend: overall.slope > 5 ? 'up' : overall.slope < -5 ? 'down' : 'stable',
+            historical,
+            categoryForecasts: categoryForecasts.slice(0, 6),
+        });
+    } catch (err) {
+        console.error('[analytics/forecast]', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
 module.exports = router;

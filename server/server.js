@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth');
 const billRoutes = require('./routes/bills');
 const analyticsRoutes = require('./routes/analytics');
 const uploadBillRoute = require('./routes/upload-bill'); // NEW
+const budgetRoutes    = require('./routes/budget');       // NEW
 
 const app = express();
 
@@ -21,6 +22,9 @@ app.use('/api/analytics', analyticsRoutes);
 
 // NEW: ML-powered upload route
 app.use('/api/bills/upload-bill', uploadBillRoute);
+
+// NEW: Budget planner routes
+app.use('/api/budget', budgetRoutes);
 
 // Health check
 app.get('/', (_req, res) => res.json({ status: 'ok' }));
