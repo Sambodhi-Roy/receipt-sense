@@ -1,0 +1,20 @@
+# ReceiptSense ML Service — Python dependencies
+# Install: pip install -r requirements.txt
+
+# Web framework
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9  # required for file uploads in FastAPI
+
+# Image handling
+Pillow==10.3.0
+
+# Donut model + HuggingFace ecosystem
+torch==2.2.2
+torchvision==0.17.2
+transformers==4.40.1
+sentencepiece==0.2.0     # Donut tokeniser dependency
+donut-python==1.0.9      # Official Donut helpers (token2json, etc.)
+
+# Utility
+python-dotenv==1.0.1

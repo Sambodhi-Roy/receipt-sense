@@ -54,9 +54,47 @@ router.post('/upload', auth, upload.single('image'), async (req, res) => {
 });
 
 // GET /api/bills
+// Optional query params: search, category, startDate, endDate, vendor
 router.get('/', auth, async (req, res) => {
     try {
-        const bills = await Bill.find({ userId: req.user.id }).sort({ createdAt: -1 });
+        const { search, category, startDate, endDate, vendor } = req.query;
+        const filter = { userId: req.user.id };
+
+        if (startDate || endDate) {
+            filter.date = {};
+            if (startDate) filter.date.$gte = new Date(startDate);
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                filter.date.$lte = end;
+            }
+        }
+
+        if (vendor) {
+            filter.$or = [
+                { vendor:     { $regex: vendor, $options: 'i' } },
+                { store_name: { $regex: vendor, $options: 'i' } },
+            ];
+        }
+
+        let bills = await Bill.find(filter).sort({ date: -1, createdAt: -1 }).lean();
+
+        if (category && category !== 'all') {
+            bills = bills.filter((b) =>
+                b.items.some((item) => (item.category || 'others') === category)
+            );
+        }
+
+        if (search) {
+            const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const re = new RegExp(escaped, 'i');
+            bills = bills.filter((b) =>
+                re.test(b.vendor) ||
+                re.test(b.store_name || '') ||
+                b.items.some((item) => re.test(item.name))
+            );
+        }
+
         res.json(bills);
     } catch (err) {
         console.error(err);

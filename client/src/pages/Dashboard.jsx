@@ -2,21 +2,31 @@ import { useEffect, useState } from 'react';
 import api from '../api/api';
 import Navbar from '../components/Navbar';
 import UploadModal from '../components/UploadModal';
+import CategoryPieChart from '../components/CategoryPieChart';
+import MonthlyTrendChart from '../components/MonthlyTrendChart';
+import InsightsSection from '../components/InsightsSection';
+import BudgetAlert from '../components/BudgetAlert';
 
 export default function Dashboard() {
     const [analytics, setAnalytics] = useState({ weeklyTotal: 0, monthlyTotal: 0 });
+    const [extended, setExtended] = useState(null);
+    const [budgetAlerts, setBudgetAlerts] = useState([]);
     const [bills, setBills] = useState([]);
     const [showUpload, setShowUpload] = useState(false);
     const [loading, setLoading] = useState(true);
 
     const fetchData = async () => {
         try {
-            const [analyticsRes, billsRes] = await Promise.all([
+            const [analyticsRes, billsRes, extRes, budgetRes] = await Promise.all([
                 api.get('/analytics'),
                 api.get('/bills'),
+                api.get('/analytics/extended').catch(() => ({ data: null })),
+                api.get('/budget/status').catch(() => ({ data: { alerts: [] } })),
             ]);
             setAnalytics(analyticsRes.data);
             setBills(billsRes.data);
+            setExtended(extRes.data);
+            setBudgetAlerts(budgetRes.data?.alerts || []);
         } catch (err) {
             console.error(err);
         } finally {
@@ -28,8 +38,11 @@ export default function Dashboard() {
 
     const handleUploaded = (newBill) => {
         setBills((prev) => [newBill, ...prev]);
-        // Refresh analytics
-        api.get('/analytics').then((res) => setAnalytics(res.data)).catch(console.error);
+        Promise.all([
+            api.get('/analytics').then((res) => setAnalytics(res.data)),
+            api.get('/analytics/extended').then((res) => setExtended(res.data)).catch(() => {}),
+            api.get('/budget/status').then((res) => setBudgetAlerts(res.data?.alerts || [])).catch(() => {}),
+        ]).catch(console.error);
     };
 
     const recentBills = bills.slice(0, 5);
@@ -47,32 +60,56 @@ export default function Dashboard() {
             <Navbar />
 
             <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-                {/* Stats */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                    {/* Weekly */}
+
+                {/* ── Budget alerts ── */}
+                <BudgetAlert alerts={budgetAlerts} />
+
+                {/* ── Stats row ── */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                     <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
                         <div className="flex items-center gap-3 mb-1">
                             <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-emerald-100 text-emerald-600 text-xl">📅</span>
-                            <p className="text-sm font-medium text-gray-500">Total Spent This Week</p>
+                            <p className="text-sm font-medium text-gray-500">This Week</p>
                         </div>
                         <p className="text-3xl font-bold text-gray-900 mt-3">
-                            ${analytics.weeklyTotal.toFixed(2)}
+                            ₹{analytics.weeklyTotal.toFixed(2)}
                         </p>
                     </div>
 
-                    {/* Monthly */}
                     <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
                         <div className="flex items-center gap-3 mb-1">
                             <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-teal-100 text-teal-600 text-xl">📆</span>
-                            <p className="text-sm font-medium text-gray-500">Total Spent This Month</p>
+                            <p className="text-sm font-medium text-gray-500">This Month</p>
                         </div>
                         <p className="text-3xl font-bold text-gray-900 mt-3">
-                            ${analytics.monthlyTotal.toFixed(2)}
+                            ₹{analytics.monthlyTotal.toFixed(2)}
                         </p>
                     </div>
+
+                    {extended && (
+                        <>
+                            <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
+                                <div className="flex items-center gap-3 mb-1">
+                                    <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-violet-100 text-violet-600 text-xl">🧾</span>
+                                    <p className="text-sm font-medium text-gray-500">Total Bills</p>
+                                </div>
+                                <p className="text-3xl font-bold text-gray-900 mt-3">{extended.totalBills}</p>
+                            </div>
+
+                            <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
+                                <div className="flex items-center gap-3 mb-1">
+                                    <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-amber-100 text-amber-600 text-xl">💰</span>
+                                    <p className="text-sm font-medium text-gray-500">Avg Bill</p>
+                                </div>
+                                <p className="text-3xl font-bold text-gray-900 mt-3">
+                                    ₹{extended.avgBillValue.toFixed(2)}
+                                </p>
+                            </div>
+                        </>
+                    )}
                 </div>
 
-                {/* Upload Button */}
+                {/* ── Upload button ── */}
                 <button
                     onClick={() => setShowUpload(true)}
                     className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-semibold rounded-xl shadow hover:from-emerald-700 hover:to-teal-700 transition-all cursor-pointer"
@@ -83,7 +120,30 @@ export default function Dashboard() {
                     Upload Bill
                 </button>
 
-                {/* Recent Bills */}
+                {/* ── Charts row ── */}
+                {extended && (extended.categorySpending.length > 0 || extended.monthlySpending.length > 0) && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {extended.categorySpending.length > 0 && (
+                            <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
+                                <h2 className="text-base font-semibold text-gray-800 mb-4">Spending by Category</h2>
+                                <CategoryPieChart data={extended.categorySpending} />
+                            </div>
+                        )}
+                        {extended.monthlySpending.length > 0 && (
+                            <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
+                                <h2 className="text-base font-semibold text-gray-800 mb-4">Monthly Trend</h2>
+                                <MonthlyTrendChart data={extended.monthlySpending} />
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ── Insights ── */}
+                {extended?.insights?.length > 0 && (
+                    <InsightsSection insights={extended.insights} />
+                )}
+
+                {/* ── Recent Bills ── */}
                 <section>
                     <h2 className="text-lg font-semibold text-gray-800 mb-4">Recent Bills</h2>
 
@@ -101,13 +161,13 @@ export default function Dashboard() {
                                 >
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2 mb-1">
-                                            <span className="font-semibold text-gray-900">{bill.vendor}</span>
+                                            <span className="font-semibold text-gray-900">{bill.store_name || bill.vendor}</span>
                                             <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
                                                 {bill.category}
                                             </span>
                                         </div>
                                         <p className="text-sm text-gray-500">
-                                            {new Date(bill.date).toLocaleDateString('en-US', {
+                                            {new Date(bill.date).toLocaleDateString('en-IN', {
                                                 year: 'numeric', month: 'short', day: 'numeric',
                                             })}
                                             {' · '}
@@ -115,7 +175,7 @@ export default function Dashboard() {
                                         </p>
                                     </div>
                                     <p className="text-lg font-bold text-gray-900 whitespace-nowrap ml-4">
-                                        ${bill.total.toFixed(2)}
+                                        ₹{bill.total.toFixed(2)}
                                     </p>
                                 </div>
                             ))}
