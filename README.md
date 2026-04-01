@@ -331,5 +331,5 @@ If the ML service is unreachable (e.g., 502/503), the frontend falls back to the
 - **Sambodhi Roy**  
   🔗 https://github.com/Sambodhi-Roy  
 
-- **Arpit Singh (scarwizz)**  
+- **Arpit Singh**  
   🔗 https://github.com/scarwizz  
